@@ -13,6 +13,7 @@ from typing import List, Optional
 from data.iNatData import INaturalistNClasses
 from data.utils import create_subsampled_dataset, ApplyTransform
 from data.cardiac import CardiacData
+from data.cxr_nodule import CXRNoduleData
 
 
 class InMemoryDataset(Dataset):
@@ -454,6 +455,130 @@ class CardiacDataModule(LightningDataModule):
             batch_size=self.batch_size, 
             num_workers=self.num_workers
         )
+
+
+class CXRNoduleDataModule(LightningDataModule):
+    """Lightning DataModule for CXR14 Nodule classification.
+    
+    Args:
+        data_dir: Path to data directory
+        train_transform: Transform to apply to training images
+        val_transform: Transform to apply to validation/test images
+        num_workers: Number of subprocesses for data loading
+        minority_class: Minority class name
+        batch_size: Number of samples per batch
+        seed: Random seed
+        drop_last: Whether to drop last incomplete batch
+        shuffle: Whether to shuffle training data
+        pin_memory: Whether to pin memory for faster GPU transfer
+        use_pil: Whether to use PIL for image loading
+        subsample_balanced_train: Whether to balance training data
+    """
+    def __init__(self, 
+                 data_dir: str, 
+                 train_transform=None,
+                 val_transform=None,
+                 num_workers: int = 32,
+                 minority_class: str = "normal",
+                 batch_size: int = 64,
+                 seed: int = 42,
+                 drop_last: bool = True,
+                 shuffle: bool = True,
+                 pin_memory=True,
+                 use_pil=False,
+                 subsample_balanced_train=False):
+
+        super().__init__()
+        self.minority_class = minority_class
+        self.root_dir = data_dir
+        self.train_transform = train_transform
+        self.val_transform = val_transform
+        self.seed = seed
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.drop_last = drop_last
+        self.subsample_balanced_train = subsample_balanced_train
+        self.use_pil = use_pil
+        self.shuffle = shuffle
+        self.pin_memory = pin_memory
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
+
+    def setup(self, stage=None):
+        self.test_dataset = CXRNoduleData(
+            split="test", 
+            transform=self.val_transform, 
+            minority_class=self.minority_class, 
+            use_pil=self.use_pil
+        )
+        
+        train_dataset = CXRNoduleData(
+            split="train", 
+            minority_class=self.minority_class, 
+            use_pil=self.use_pil
+        )
+        
+        val_dataset = CXRNoduleData(
+            split="val",  
+            minority_class=self.minority_class, 
+            use_pil=self.use_pil
+        )
+        
+        if self.subsample_balanced_train:
+            train_dataset, train_counts = create_subsampled_dataset(
+                train_dataset, 
+                None, 
+                subsample_balanced=True, 
+                subsample_balanced_percent_of_total=0.05
+            )
+            self.classes = [0, 1]
+        
+        # Apply transforms
+        self.train_dataset = ApplyTransform(train_dataset, self.train_transform)
+        self.val_dataset = ApplyTransform(val_dataset, self.val_transform)
+        
+        if not self.subsample_balanced_train:
+            labels_at_index_0 = [tup[0] for tup in train_dataset.index]
+            train_counts = Counter(labels_at_index_0)
+            self.classes = list(set(labels_at_index_0))
+            
+        self.train_counts = [train_counts[cls] for cls in self.classes]
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            pin_memory=self.pin_memory, 
+            shuffle=self.shuffle, 
+            persistent_workers=True,
+            num_workers=self.num_workers, 
+            drop_last=self.drop_last,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset, 
+            batch_size=self.batch_size, 
+            num_workers=self.num_workers, 
+            shuffle=False, 
+            persistent_workers=True
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            self.test_dataset, 
+            batch_size=self.batch_size, 
+            num_workers=self.num_workers
+        )
+
+    def predict_dataloader(self):
+        return DataLoader(
+            self.test_dataset, 
+            batch_size=self.batch_size, 
+            num_workers=self.num_workers
+        )
+
 
 
 try:

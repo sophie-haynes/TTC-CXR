@@ -1,0 +1,9 @@
+data_module:
+  _target_: data.data_module.CXRNoduleDataModule
+  _partial_: true
+  _args_:
+     - "${oc.env:CXR_NODULE_DATA_PATH}"
+  num_workers: 32
+  batch_size: ${batch_size}
+  seed: ${seed}
+  minority_class: "normal"
