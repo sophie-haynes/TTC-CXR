@@ -6,7 +6,7 @@ import pickle
 from typing import Any, Callable, List, Optional, Tuple
 
 import torch
-from torch.utils.data import VisionDataset
+from torchvision.datasets import VisionDataset
 from torchvision.transforms.functional import to_pil_image
 
 
