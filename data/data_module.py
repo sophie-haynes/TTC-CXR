@@ -458,21 +458,24 @@ class CardiacDataModule(LightningDataModule):
 
 
 class CXRNoduleDataModule(LightningDataModule):
-    """Lightning DataModule for CXR14 Nodule classification.
+    """Lightning DataModule for CXR Nodule classification.
     
     Args:
-        data_dir: Path to data directory
+        data_dir: Path to data directory containing train/val/test splits
         train_transform: Transform to apply to training images
         val_transform: Transform to apply to validation/test images
         num_workers: Number of subprocesses for data loading
         minority_class: Minority class name
+        classes: List of class names to use (optional)
         batch_size: Number of samples per batch
         seed: Random seed
         drop_last: Whether to drop last incomplete batch
         shuffle: Whether to shuffle training data
         pin_memory: Whether to pin memory for faster GPU transfer
-        use_pil: Whether to use PIL for image loading
+        persistent_workers: Whether to keep worker processes alive
         subsample_balanced_train: Whether to balance training data
+        train_ratio: Ratio of data for training (for CXRNoduleData internal splitting)
+        val_ratio: Ratio of data for validation (for CXRNoduleData internal splitting)
     """
     def __init__(self, 
                  data_dir: str, 
@@ -480,17 +483,21 @@ class CXRNoduleDataModule(LightningDataModule):
                  val_transform=None,
                  num_workers: int = 32,
                  minority_class: str = "normal",
+                 classes: Optional[List[str]] = None,
                  batch_size: int = 64,
                  seed: int = 42,
                  drop_last: bool = True,
                  shuffle: bool = True,
                  pin_memory=True,
-                 use_pil=False,
-                 subsample_balanced_train=False):
+                 persistent_workers=True,
+                 subsample_balanced_train=False,
+                 train_ratio: float = 0.9,
+                 val_ratio: float = 0.05):
 
         super().__init__()
         self.minority_class = minority_class
         self.root_dir = data_dir
+        self.classes = classes
         self.train_transform = train_transform
         self.val_transform = val_transform
         self.seed = seed
@@ -498,33 +505,45 @@ class CXRNoduleDataModule(LightningDataModule):
         self.num_workers = num_workers
         self.drop_last = drop_last
         self.subsample_balanced_train = subsample_balanced_train
-        self.use_pil = use_pil
         self.shuffle = shuffle
         self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.train_ratio = train_ratio
+        self.val_ratio = val_ratio
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
 
     def setup(self, stage=None):
+        """Setup CXR Nodule datasets for pre-split data structure."""
+        import os
+        
+        # Point each dataset to the specific split directory
+        train_dir = os.path.join(self.root_dir, "train")
+        val_dir = os.path.join(self.root_dir, "val") 
+        test_dir = os.path.join(self.root_dir, "test")
+        
+        # Create datasets for each split - no need for split parameter since we're pointing to split-specific dirs
         self.test_dataset = CXRNoduleData(
-            split="test", 
+            img_root=test_dir,
             transform=self.val_transform, 
-            minority_class=self.minority_class, 
-            use_pil=self.use_pil
+            minority_class=self.minority_class,
+            classes=self.classes
         )
         
         train_dataset = CXRNoduleData(
-            split="train", 
-            minority_class=self.minority_class, 
-            use_pil=self.use_pil
+            img_root=train_dir,
+            minority_class=self.minority_class,
+            classes=self.classes
         )
         
         val_dataset = CXRNoduleData(
-            split="val",  
-            minority_class=self.minority_class, 
-            use_pil=self.use_pil
+            img_root=val_dir,
+            minority_class=self.minority_class,
+            classes=self.classes
         )
         
+        # Apply subsampling to training data if requested
         if self.subsample_balanced_train:
             train_dataset, train_counts = create_subsampled_dataset(
                 train_dataset, 
@@ -532,18 +551,22 @@ class CXRNoduleDataModule(LightningDataModule):
                 subsample_balanced=True, 
                 subsample_balanced_percent_of_total=0.05
             )
-            self.classes = [0, 1]
+            self.classes = [0, 1]  # Binary classification after balancing
         
         # Apply transforms
         self.train_dataset = ApplyTransform(train_dataset, self.train_transform)
         self.val_dataset = ApplyTransform(val_dataset, self.val_transform)
         
+        # Get class information and counts
         if not self.subsample_balanced_train:
+            # Extract class information from the dataset
+            self.classes = train_dataset.classes
+            # Count samples per class from the dataset index
+            from collections import Counter
             labels_at_index_0 = [tup[0] for tup in train_dataset.index]
             train_counts = Counter(labels_at_index_0)
-            self.classes = list(set(labels_at_index_0))
             
-        self.train_counts = [train_counts[cls] for cls in self.classes]
+        self.train_counts = [train_counts[cls] for cls in range(len(self.classes))]
 
     def train_dataloader(self):
         return DataLoader(
@@ -551,7 +574,7 @@ class CXRNoduleDataModule(LightningDataModule):
             batch_size=self.batch_size,
             pin_memory=self.pin_memory, 
             shuffle=self.shuffle, 
-            persistent_workers=True,
+            persistent_workers=self.persistent_workers,
             num_workers=self.num_workers, 
             drop_last=self.drop_last,
         )
@@ -562,7 +585,7 @@ class CXRNoduleDataModule(LightningDataModule):
             batch_size=self.batch_size, 
             num_workers=self.num_workers, 
             shuffle=False, 
-            persistent_workers=True
+            persistent_workers=self.persistent_workers
         )
 
     def test_dataloader(self):
@@ -578,7 +601,6 @@ class CXRNoduleDataModule(LightningDataModule):
             batch_size=self.batch_size, 
             num_workers=self.num_workers
         )
-
 
 
 try:
