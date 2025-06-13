@@ -157,6 +157,29 @@ class ContrastiveResNet50(LightningModule):
             self.log('val.loss_maj', loss_maj)
         self.log('val.loss', loss)
 
+    def test_step(self, batch, batch_idx, dataloader_idx=0) -> torch.Tensor:
+        images, labels = batch
+        images = torch.cat(images[:-1], dim=0)
+        embeddings, projection = self.forward(images)
+
+        f1, f2 = torch.split(projection, [labels.shape[0], labels.shape[0]], dim=0)
+        features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
+
+        if labels.shape[0] != self.batch_size:
+            return
+
+        if self.supervised:
+            loss, logits, batch_labels = self.critereon(features, labels)
+        else:
+            loss, logits, batch_labels = self.critereon(features)
+
+        # Log losses
+        if not torch.is_tensor(loss) and len(loss) == 3:
+            (loss, loss_min, loss_maj) = loss
+            self.log('test.loss_min', loss_min)
+            self.log('test.loss_maj', loss_maj)
+        self.log('test.loss', loss)
+
 
      
 
@@ -390,6 +413,40 @@ class ContrastiveResNet50Prototypes(ContrastiveResNet50):
 
         if hasattr(self, 'prototype_1') and hasattr(self, 'prototype_2'):
             self._log_distance_to_prototypes(projection, labels, split="val")
+
+    def test_step(self, batch, batch_idx, dataloader_idx=0) -> torch.Tensor:
+        images, labels = batch
+        if len(labels.shape) > 1:
+            labels = labels.squeeze()
+        len_images = len(images[0])
+
+        n_contrastive_views = 2
+
+        support_labels = torch.zeros(
+            labels.shape[0], 2, dtype=torch.float32)
+
+        support_labels[:, 0] = 1.0 - labels
+        support_labels[:, 1] = labels
+
+        images = torch.cat(images[:n_contrastive_views], dim=0)
+        _, projection = self.forward(images)
+
+        del images
+
+        f1, f2 = torch.split(
+            projection, [labels.shape[0], labels.shape[0]], dim=0)
+
+        features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
+       
+        loss, logits, batch_labels = self.critereon(
+                features, support_labels)
+
+        self.log('test.loss', loss)
+
+        if hasattr(self, 'prototype_1') and hasattr(self, 'prototype_2'):
+            self._log_distance_to_prototypes(projection, labels, split="test")
+
+
 
 
 
