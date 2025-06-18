@@ -34,6 +34,7 @@ class CXRNoduleData(VisionDataset):
         train_ratio: float = 0.9,
         val_ratio: float = 0.05,
         # test_ratio will be 1 - train_ratio - val_ratio
+        skip_split = True
     ) -> None:
 
         self.split = split
@@ -41,6 +42,7 @@ class CXRNoduleData(VisionDataset):
         self.train_ratio = train_ratio
         self.val_ratio = val_ratio
         self.test_ratio = 1.0 - train_ratio - val_ratio
+        self.skip_split = skip_split
         
         if self.split not in ["train", "val", "test"]:
             raise ValueError(f"Split must be 'train', 'val', or 'test', got {split}")
@@ -106,23 +108,26 @@ class CXRNoduleData(VisionDataset):
         random.seed(42)
         random.shuffle(all_samples)
 
-        # Split data into train/val/test
-        n_total = len(all_samples)
-        n_train = int(self.train_ratio * n_total)
-        n_val = int(self.val_ratio * n_total)
-        n_test = n_total - n_train - n_val
-
-        train_samples = all_samples[:n_train]
-        val_samples = all_samples[n_train:n_train + n_val]
-        test_samples = all_samples[n_train + n_val:]
-
-        # Select samples for current split
-        if self.split == "train":
-            self.index = train_samples
-        elif self.split == "val":
-            self.index = val_samples
-        elif self.split == "test":
-            self.index = test_samples
+        if not self.skip_split:
+            # Split data into train/val/test
+            n_total = len(all_samples)
+            n_train = int(self.train_ratio * n_total)
+            n_val = int(self.val_ratio * n_total)
+            n_test = n_total - n_train - n_val
+    
+            train_samples = all_samples[:n_train]
+            val_samples = all_samples[n_train:n_train + n_val]
+            test_samples = all_samples[n_train + n_val:]
+    
+            # Select samples for current split
+            if self.split == "train":
+                self.index = train_samples
+            elif self.split == "val":
+                self.index = val_samples
+            elif self.split == "test":
+                self.index = test_samples
+        else:
+            self.index = all_samples
 
         self._print_dataset_info()
 

@@ -459,7 +459,7 @@ class CardiacDataModule(LightningDataModule):
 
 class CXRNoduleDataModule(LightningDataModule):
     """Lightning DataModule for CXR Nodule classification.
-    
+
     Args:
         data_dir: Path to data directory containing train/val/test splits
         train_transform: Transform to apply to training images
@@ -473,12 +473,12 @@ class CXRNoduleDataModule(LightningDataModule):
         shuffle: Whether to shuffle training data
         pin_memory: Whether to pin memory for faster GPU transfer
         persistent_workers: Whether to keep worker processes alive
-        subsample_balanced_train: Whether to balance training data
-        train_ratio: Ratio of data for training (for CXRNoduleData internal splitting)
-        val_ratio: Ratio of data for validation (for CXRNoduleData internal splitting)
+        # REMOVED: subsample_balanced_train: Whether to balance training data
+        # REMOVED: train_ratio: Ratio of data for training (for CXRNoduleData internal splitting)
+        # REMOVED: val_ratio: Ratio of data for validation (for CXRNoduleData internal splitting)
     """
-    def __init__(self, 
-                 data_dir: str, 
+    def __init__(self,
+                 data_dir: str,
                  train_transform=None,
                  val_transform=None,
                  num_workers: int = 32,
@@ -490,9 +490,11 @@ class CXRNoduleDataModule(LightningDataModule):
                  shuffle: bool = True,
                  pin_memory=True,
                  persistent_workers=True,
-                 subsample_balanced_train=False,
-                 train_ratio: float = 0.9,
-                 val_ratio: float = 0.05):
+                 skip_split=True
+                 # subsample_balanced_train=False,
+                 # train_ratio: float = 0.9,
+                 # val_ratio: float = 0.05
+                 ):
 
         super().__init__()
         self.minority_class = minority_class
@@ -504,101 +506,111 @@ class CXRNoduleDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.drop_last = drop_last
-        self.subsample_balanced_train = subsample_balanced_train
+        # self.subsample_balanced_train = subsample_balanced_train
         self.shuffle = shuffle
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
-        self.train_ratio = train_ratio
-        self.val_ratio = val_ratio
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
+        self.skip_split = skip_split
+        # self.train_ratio = train_ratio
+        # self.val_ratio = val_ratio
+        # self.train_dataset = None
+        # self.val_dataset = None
+        # self.test_dataset = None
 
     def setup(self, stage=None):
         """Setup CXR Nodule datasets for pre-split data structure."""
         import os
-        
+
         # Point each dataset to the specific split directory
         train_dir = os.path.join(self.root_dir, "train")
-        val_dir = os.path.join(self.root_dir, "val") 
+        val_dir = os.path.join(self.root_dir, "val")
         test_dir = os.path.join(self.root_dir, "test")
-        
-        # Create datasets for each split - no need for split parameter since we're pointing to split-specific dirs
+
+        # Create datasets for each split
+
         self.test_dataset = CXRNoduleData(
             img_root=test_dir,
-            transform=self.val_transform, 
+            split="test",
+            transform=self.val_transform,
             minority_class=self.minority_class,
-            classes=self.classes
+            classes=self.classes,
+            skip_split=self.skip_split
         )
-        
-        train_dataset = CXRNoduleData(
+
+        self.train_dataset = CXRNoduleData(
             img_root=train_dir,
             minority_class=self.minority_class,
-            classes=self.classes
+            transform=self.train_transform,
+            classes=self.classes,
+            skip_split=self.skip_split
         )
-        
-        val_dataset = CXRNoduleData(
+
+        self.val_dataset = CXRNoduleData(
             img_root=val_dir,
+            split="val",
             minority_class=self.minority_class,
-            classes=self.classes
+            transform=self.val_transform,
+            classes=self.classes,
+            skip_split=self.skip_split
         )
-        
+
         # Apply subsampling to training data if requested
-        if self.subsample_balanced_train:
-            train_dataset, train_counts = create_subsampled_dataset(
-                train_dataset, 
-                None, 
-                subsample_balanced=True, 
-                subsample_balanced_percent_of_total=0.05
-            )
-            self.classes = [0, 1]  # Binary classification after balancing
-        
-        # Apply transforms
-        self.train_dataset = ApplyTransform(train_dataset, self.train_transform)
-        self.val_dataset = ApplyTransform(val_dataset, self.val_transform)
-        
-        # Get class information and counts
-        if not self.subsample_balanced_train:
-            # Extract class information from the dataset
-            self.classes = train_dataset.classes
-            # Count samples per class from the dataset index
-            from collections import Counter
-            labels_at_index_0 = [tup[0] for tup in train_dataset.index]
-            train_counts = Counter(labels_at_index_0)
-            
-        self.train_counts = [train_counts[cls] for cls in range(len(self.classes))]
+        # if self.subsample_balanced_train:
+        #     train_dataset, train_counts = create_subsampled_dataset(
+        #         train_dataset,
+        #         None,
+        #         subsample_balanced=True,
+        #         subsample_balanced_percent_of_total=0.05
+        #     )
+        #     self.classes = [0, 1]  # Binary classification after balancing
+
+        # REDUNDANT - From Cardiac code, we pass trfm to dataset gen.
+        # # Apply transforms
+        # self.train_dataset = ApplyTransform(train_dataset, self.train_transform)
+        # self.val_dataset = ApplyTransform(val_dataset, self.val_transform)
+
+        # # Get class information and counts
+        # if not self.subsample_balanced_train:
+        #     # Extract class information from the dataset
+        #     self.classes = train_dataset.classes
+        #     # Count samples per class from the dataset index
+        #     from collections import Counter
+        #     labels_at_index_0 = [tup[0] for tup in train_dataset.index]
+        #     train_counts = Counter(labels_at_index_0)
+  
+        # self.train_counts = [train_counts[cls] for cls in range(len(self.classes))]
 
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            pin_memory=self.pin_memory, 
-            shuffle=self.shuffle, 
+            pin_memory=self.pin_memory,
+            shuffle=self.shuffle,
             persistent_workers=self.persistent_workers,
-            num_workers=self.num_workers, 
+            num_workers=self.num_workers,
             drop_last=self.drop_last,
         )
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_dataset, 
-            batch_size=self.batch_size, 
-            num_workers=self.num_workers, 
-            shuffle=False, 
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False,
             persistent_workers=self.persistent_workers
         )
 
     def test_dataloader(self):
         return DataLoader(
-            self.test_dataset, 
-            batch_size=self.batch_size, 
+            self.test_dataset,
+            batch_size=self.batch_size,
             num_workers=self.num_workers
         )
 
     def predict_dataloader(self):
         return DataLoader(
-            self.test_dataset, 
-            batch_size=self.batch_size, 
+            self.test_dataset,
+            batch_size=self.batch_size,
             num_workers=self.num_workers
         )
 
